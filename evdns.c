@@ -3956,6 +3956,47 @@ evdns_config_windows_nameservers(void)
 }
 #endif
 
+#ifdef __BIONIC__
+#include <sys/system_properties.h>
+
+static int
+evdns_base_config_android_nameservers(struct evdns_base *base)
+{
+	int add_servers = 0;
+  size_t i;
+	static const char *const props[] = {"net.dns1", "net.dns2", "net.dns3", "net.dns4"};
+
+	if (base == NULL)
+		base = current_base;
+	if (base == NULL)
+		return -1;
+
+	EVDNS_LOCK(base);
+	for (i = 0; i < (sizeof(props) / sizeof(props[0])); i++)
+	{
+		char const *prop = props[i];
+		char buf[PROP_VALUE_MAX] = { 0 };
+		int r = __system_property_get(prop, buf);
+
+		/* minimum size of dotted IPV4 address
+		 * (returned length is that of string w/o nul) */
+		if (r >= 7)
+		{
+			add_servers++;
+			evdns_base_nameserver_ip_add(base, buf);
+		}
+	}
+
+	if (add_servers == 0)
+	{
+		log(EVDNS_LOG_WARN,"Didn't find any nameservers.");
+	}
+
+	EVDNS_UNLOCK(base);
+	return 0;
+}
+#endif
+
 struct evdns_base *
 evdns_base_new(struct event_base *event_base, int flags)
 {
@@ -4029,6 +4070,8 @@ evdns_base_new(struct event_base *event_base, int flags)
 
 #ifdef _WIN32
 		r = evdns_base_config_windows_nameservers(base);
+#elif defined(__BIONIC__)
+		r = evdns_base_config_android_nameservers(base);
 #else
 		r = evdns_base_resolv_conf_parse(base, opts, "/etc/resolv.conf");
 #endif
